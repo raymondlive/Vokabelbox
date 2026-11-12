@@ -1,10 +1,11 @@
 // Speichert die App auf dem Gerät, damit sie offline startet.
 // Bei jeder neuen Version die Nummer erhöhen.
-const VERSION = 'vokabelkasten-v1';
+const VERSION = 'vokabelkasten-v2';
 const APP_FILES = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './config.js',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png'
@@ -28,7 +29,9 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
-  if (url.origin !== location.origin && !isFont) return;
+  const isLib = url.hostname === 'cdn.jsdelivr.net';
+  // Anfragen an Supabase (Abgleich) gehen immer direkt ins Netz.
+  if (url.origin !== location.origin && !isFont && !isLib) return;
 
   e.respondWith(
     caches.open(VERSION).then(async cache => {

@@ -180,6 +180,15 @@ input[type=text]:focus,textarea:focus{outline:none;border-color:var(--accent);bo
 .demo .side{justify-content:center;height:24px}
 .demo p{margin:22px 0 0;font-family:var(--serif);font-weight:600;font-size:28px}
 .demo small{display:block;color:var(--muted);font-family:var(--serif);font-size:17px;margin-top:4px}
+#syncBox{display:flex;flex-direction:column;gap:12px;background:var(--surface);border-radius:14px;box-shadow:var(--shadow);padding:14px 16px}
+#syncBox p{margin:0}
+#syncBox .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#syncBox input{font-size:17px}
+.syncmsg{font-size:14px;color:var(--muted)}
+.syncmsg.err{color:var(--red)}
+.syncline{display:inline-flex;align-items:center;gap:6px}
+.syncdot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.syncdot.ok{background:#2F855A}.syncdot.busy{background:#C98A1B}.syncdot.err{background:var(--red)}
 @media (prefers-reduced-motion: reduce){.flash,.prog>div{transition:none}.flash.in,.sheet{animation:none}}
 </style>
 </head>
@@ -218,6 +227,7 @@ input[type=text]:focus,textarea:focus{outline:none;border-color:var(--accent);bo
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+<script src="config.js"></script>
 <script>
 const COLORS=['#C8433A','#2E6DB4','#2F855A','#C98A1B','#7B4BA8','#2F8A8A'];
 const S={folders:{},cards:{},ready:false,view:{name:'home'},learn:null};
@@ -233,16 +243,20 @@ function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTi
 
 /* ---------- Speicher ---------- */
 const LS='vokabelkasten.v1';
+const OB='vokabelkasten.outbox';
+let outbox={}, obSeq=0;
+try{outbox=JSON.parse(localStorage.getItem(OB)||'{}')||{};}catch(e){}
 function lsLoad(){try{const d=JSON.parse(localStorage.getItem(LS)||'null');if(d){S.folders=d.folders||{};S.cards=d.cards||{};}}catch(e){}}
-function lsSave(){try{localStorage.setItem(LS,JSON.stringify({folders:S.folders,cards:S.cards}));}catch(e){toast('Speichern fehlgeschlagen. Ist der Speicher des iPhones voll?');}}
+function lsSave(){try{localStorage.setItem(LS,JSON.stringify({folders:S.folders,cards:S.cards}));localStorage.setItem(OB,JSON.stringify(outbox));}catch(e){toast('Speichern fehlgeschlagen. Ist der Speicher des iPhones voll?');}}
 function onWriteErr(e){
   if(e&&e.code==='quota_exceeded')toast('Speicher voll. Lösche alte Karten, dann klappt es wieder.');
   else toast('Konnte nicht speichern. Prüfe deine Verbindung.');
 }
 function queue(path,fn){const p=(writeQ[path]||Promise.resolve()).then(fn).catch(onWriteErr);writeQ[path]=p;return p;}
-function put(col,id,data){S[col][id]=data;if(db)queue(col+'/'+id,()=>db.doc(col+'/'+id).set(data));else lsSave();}
-function patch(col,id,data){if(!S[col][id])return;S[col][id]={...S[col][id],...data};if(db)queue(col+'/'+id,()=>db.doc(col+'/'+id).update(data));else lsSave();}
-function del(col,id){delete S[col][id];if(db)queue(col+'/'+id,()=>db.doc(col+'/'+id).delete());else lsSave();}
+function dirty(col,id,op){outbox[col+'/'+id]={op,v:++obSeq+Date.now()};lsSave();scheduleSync();}
+function put(col,id,data){S[col][id]=data;dirty(col,id,'up');}
+function patch(col,id,data){if(!S[col][id])return;S[col][id]={...S[col][id],...data};dirty(col,id,'up');}
+function del(col,id){delete S[col][id];dirty(col,id,'del');}
 
 function foldersSorted(){return Object.entries(S.folders).map(([id,f])=>({id,...f})).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));}
 function cardsOf(fid){return Object.entries(S.cards).filter(([,c])=>c.folderId===fid).map(([id,c])=>({id,...c,...(pend[id]||{})})).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));}
@@ -274,10 +288,11 @@ function render(){
 }
 
 function viewHome(main){
+  setTimeout(drawSyncLine,0);
   header('Vokabelkasten',null,`<button class="gear" data-action="settings" aria-label="Einstellungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>`);
   const fs=foldersSorted(), total=Object.keys(S.cards).length;
   main.innerHTML=`
-    <div><h2 class="big">Fächer</h2><p class="sub">${plural(fs.length,'Fach','Fächer')} · ${plural(total,'Karte','Karten')}</p></div>
+    <div><h2 class="big">Fächer</h2><p class="sub">${plural(fs.length,'Fach','Fächer')} · ${plural(total,'Karte','Karten')}<br><span class="syncline" id="syncLine"></span></p></div>
     ${fs.length?`<ul class="group">${fs.map(f=>{const n=cardsOf(f.id).length;return `
       <li><button class="frow" data-action="open" data-id="${f.id}">
         <span class="tab" style="--c:${esc(f.color)}"></span>
@@ -341,6 +356,7 @@ function applyDesign(){
 }
 function saveDesign(){
   try{localStorage.setItem(DLS,JSON.stringify(S.design));}catch(e){}
+  outbox['settings/design']={op:'up',v:++obSeq+Date.now()};lsSave();scheduleSync();
 }
 sysDark.addEventListener('change',()=>{applyDesign();if(S.view.name==='settings')render();});
 new MutationObserver(()=>{applyDesign();if(S.view.name==='settings')render();}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
@@ -367,8 +383,10 @@ function viewSettings(main){
       <button class="tc" data-action="set-design" data-key="text" data-val="${k}" aria-pressed="${d.text===k}"
         style="--c:${t.light?(dark?t.dark:t.light):'var(--ink)'}"><i>A</i>${t.name}</button>`).join('')}</div>
     <button class="btn ghost" data-action="reset-design">Design zurücksetzen</button>
+    <h3 class="label">Synchronisierung</h3>
+    <div id="syncBox"></div>
     <h3 class="label">Daten sichern &amp; übertragen</h3>
-    <p class="sub">Deine Karten sind nur auf diesem Gerät gespeichert. Mach ab und zu einen Export als Sicherung, zum Beispiel in die Dateien-App oder in iCloud Drive.</p>
+    <p class="sub">Ein Export ist eine zusätzliche Sicherung als Datei, zum Beispiel für iCloud Drive.</p>
     <ul class="group">
       <li><button class="frow" data-action="export" ${Object.keys(S.folders).length?'':'disabled'}>
         <span class="t"><strong>Exportieren</strong><small>Alle Fächer und Karten als Datei speichern</small></span>
@@ -377,6 +395,7 @@ function viewSettings(main){
         <span class="t"><strong>Importieren</strong><small>Export-Datei von einem anderen Gerät laden</small></span>
         <span class="chev" aria-hidden="true">↑</span></button></li>
     </ul>`;
+  drawSyncBox(true);
 }
 
 /* ---------- Export & Import ---------- */
@@ -436,13 +455,13 @@ async function runImport(){
   const folders=importData;if(!folders)return;
   const btn=$('#igo');btn.disabled=true;
   const total=folders.reduce((a,f)=>a+1+f.cards.length,0);let done=0;
-  const write=async(col,id,data)=>{S[col][id]=data;if(db)await db.doc(col+'/'+id).set(data);done++;btn.textContent=`Importiere ${done}/${total} …`;};
+  const write=async(col,id,data)=>{S[col][id]=data;outbox[col+'/'+id]={op:'up',v:++obSeq+Date.now()};done++;btn.textContent=`Importiere ${done}/${total} …`;};
   try{
     for(const f of folders){
       await write('folders',f.id,{name:f.name,color:f.color,createdAt:f.createdAt});
       for(const c of f.cards)await write('cards',c.id,{folderId:f.id,front:c.front,back:c.back,createdAt:c.createdAt});
     }
-    if(!db)lsSave();
+    lsSave();scheduleSync(300);
     $('#iscrim').hidden=true;go({name:'home'});
     toast(`Importiert: ${plural(folders.length,'Fach','Fächer')}, ${plural(total-folders.length,'Karte','Karten')}`);
   }catch(e){
@@ -619,6 +638,10 @@ document.addEventListener('click',e=>{
     case 'import-cancel':$('#iscrim').hidden=true;break;
     case 'import-go':runImport();break;
     case 'settings':go({name:'settings'});break;
+    case 'sync-login':doAuth(false);break;
+    case 'sync-signup':doAuth(true);break;
+    case 'sync-now':SY.msg='';syncNow();break;
+    case 'sync-logout':SY.msg='';SY.sb.auth.signOut().then(()=>{SY.user=null;SY.last=null;drawSync();toast('Abgemeldet. Deine Karten bleiben auf diesem Gerät.');});break;
     case 'set-design':S.design={...S.design,[b.dataset.key]:b.dataset.val};applyDesign();saveDesign();render();break;
     case 'reset-design':S.design={...DESIGN_DEF};applyDesign();saveDesign();render();toast('Design zurückgesetzt');break;
   }
@@ -656,7 +679,159 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='ArrowLeft'&&S.learn.i>0)step(-1);
 });
 window.addEventListener('pagehide',flushAll);
-document.addEventListener('visibilitychange',()=>{if(document.hidden)flushAll();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){flushAll();syncNow();}else scheduleSync(300);});
+window.addEventListener('online',()=>scheduleSync(500));
+setInterval(()=>{if(!document.hidden)syncNow();},20000);
+
+/* ---------- Synchronisierung (Supabase) ---------- */
+const CFG=window.VOKABEL_SYNC||{};
+const SYNCED_USER='vokabelkasten.syncedUser';
+const SY={sb:null,user:null,busy:false,again:false,timer:null,last:null,err:null,msg:'',msgErr:false};
+const configured=()=>!!(CFG.url&&CFG.anonKey);
+function scheduleSync(ms=1500){clearTimeout(SY.timer);SY.timer=setTimeout(syncNow,ms);}
+function loadSupabase(){
+  if(!configured())return;
+  const sc=document.createElement('script');
+  sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+  sc.onload=startSync;sc.onerror=()=>{SY.err='Abgleich gerade nicht erreichbar (offline?).';drawSync();};
+  document.head.appendChild(sc);
+}
+async function startSync(){
+  if(!window.supabase)return;
+  SY.sb=window.supabase.createClient(CFG.url,CFG.anonKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'vokabelkasten.auth'}});
+  try{const {data}=await SY.sb.auth.getSession();SY.user=data.session?data.session.user:null;}catch(e){}
+  SY.sb.auth.onAuthStateChange((ev,session)=>{
+    const was=SY.user&&SY.user.id;SY.user=session?session.user:null;
+    if(SY.user&&SY.user.id!==was)onLogin();
+    drawSync();
+  });
+  if(SY.user)onLogin();
+  drawSync();
+}
+function onLogin(){
+  let prev=null;try{prev=localStorage.getItem(SYNCED_USER);}catch(e){}
+  if(prev!==SY.user.id){ // erstes Mal auf diesem Gerät: alles Lokale ins Konto übernehmen
+    Object.keys(S.folders).forEach(id=>outbox['folders/'+id]={op:'up',v:++obSeq+Date.now()});
+    Object.keys(S.cards).forEach(id=>outbox['cards/'+id]={op:'up',v:++obSeq+Date.now()});
+    try{localStorage.setItem(SYNCED_USER,SY.user.id);}catch(e){}
+    lsSave();
+  }
+  syncNow();
+}
+const chk=r=>{if(r&&r.error)throw r.error;return r;};
+const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));return o;};
+async function fetchAll(table){
+  let all=[];for(let from=0;;from+=1000){
+    const r=chk(await SY.sb.from(table).select('*').order('id').range(from,from+999));
+    all=all.concat(r.data||[]);if(!r.data||r.data.length<1000)break;
+  }return all;
+}
+async function syncNow(){
+  if(!SY.sb||!SY.user)return;
+  if(!navigator.onLine){drawSync();return;}
+  if(SY.busy){SY.again=true;return;}
+  SY.busy=true;drawSync();
+  try{
+    flushAll();
+    const uidv=SY.user.id, now=new Date().toISOString();
+    const ops=Object.entries(outbox).map(([k,o])=>[k,o.op,o.v]);
+    const up={folders:[],cards:[]},rm={folders:[],cards:[]};let design=false;
+    for(const [k,op] of ops){
+      const [col,id]=k.split('/');
+      if(col==='settings'){design=true;continue;}
+      if(!up[col])continue;
+      const d=S[col][id];
+      if(op==='del'||!d){rm[col].push(id);continue;}
+      up[col].push(col==='folders'
+        ?{user_id:uidv,id,name:d.name||'',color:d.color||null,created_at:Math.round(d.createdAt||0),updated_at:now}
+        :{user_id:uidv,id,folder_id:d.folderId,front:d.front||'',back:d.back||'',created_at:Math.round(d.createdAt||0),updated_at:now});
+    }
+    for(const c of chunks(up.folders,500))chk(await SY.sb.from('folders').upsert(c,{onConflict:'user_id,id'}));
+    for(const c of chunks(up.cards,500))chk(await SY.sb.from('cards').upsert(c,{onConflict:'user_id,id'}));
+    for(const c of chunks(rm.cards,100))chk(await SY.sb.from('cards').delete().in('id',c));
+    for(const c of chunks(rm.folders,100))chk(await SY.sb.from('folders').delete().in('id',c));
+    if(design)chk(await SY.sb.from('settings').upsert({user_id:uidv,design:S.design,updated_at:now},{onConflict:'user_id'}));
+    ops.forEach(([k,,v])=>{if(outbox[k]&&outbox[k].v===v)delete outbox[k];});
+
+    const [fr,cr,sr]=await Promise.all([fetchAll('folders'),fetchAll('cards'),SY.sb.from('settings').select('design').maybeSingle()]);
+    chk(sr);
+    const nf={},nc={};
+    fr.forEach(r=>nf[r.id]={name:r.name,color:r.color||COLORS[0],createdAt:Number(r.created_at)||0});
+    cr.forEach(r=>nc[r.id]={folderId:r.folder_id,front:r.front||'',back:r.back||'',createdAt:Number(r.created_at)||0});
+    for(const [k,o] of Object.entries(outbox)){ // Änderungen, die während des Abgleichs passiert sind
+      const [col,id]=k.split('/');const t=col==='folders'?nf:col==='cards'?nc:null;if(!t)continue;
+      if(o.op==='del')delete t[id];else if(S[col][id])t[id]=S[col][id];
+    }
+    const changed=JSON.stringify([S.folders,S.cards])!==JSON.stringify([nf,nc]);
+    S.folders=nf;S.cards=nc;lsSave();
+    if(sr.data&&sr.data.design&&!outbox['settings/design']){
+      const nd={...DESIGN_DEF,...sr.data.design};
+      if(JSON.stringify(nd)!==JSON.stringify(S.design)){S.design=nd;try{localStorage.setItem(DLS,JSON.stringify(nd));}catch(e){}applyDesign();if(S.view.name==='settings')render();}
+    }
+    if(changed&&S.view.name!=='settings')render();
+    SY.last=Date.now();SY.err=null;
+  }catch(e){
+    SY.err=(e&&e.message)||String(e);
+  }finally{
+    SY.busy=false;drawSync();
+    if(SY.again){SY.again=false;scheduleSync(300);}
+  }
+}
+function syncState(){
+  if(!configured())return {cls:'',text:''};
+  if(!SY.user)return {cls:'',text:'Nicht angemeldet: nur auf diesem Gerät'};
+  if(SY.busy)return {cls:'busy',text:'Gleiche ab …'};
+  if(!navigator.onLine)return {cls:'busy',text:'Offline: wird später abgeglichen'};
+  if(SY.err)return {cls:'err',text:'Abgleich fehlgeschlagen'};
+  if(Object.keys(outbox).length)return {cls:'busy',text:'Änderungen warten auf Abgleich'};
+  if(SY.last)return {cls:'ok',text:'Abgeglichen um '+new Date(SY.last).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})};
+  return {cls:'busy',text:'Verbinde …'};
+}
+function drawSyncLine(){
+  const el=$('#syncLine');if(!el)return;
+  const st=syncState();
+  el.innerHTML=st.text?`<span class="syncdot ${st.cls}"></span>${esc(st.text)}`:'';
+}
+function drawSync(){drawSyncLine();drawSyncBox(false);}
+function drawSyncBox(force){
+  const box=$('#syncBox');if(!box)return;
+  if(!force&&box.contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
+  const msg=SY.msg?`<p class="syncmsg ${SY.msgErr?'err':''}">${esc(SY.msg)}</p>`:'';
+  if(!configured()){
+    box.innerHTML=`<p>Der Abgleich ist noch nicht eingerichtet.</p><p class="syncmsg">Trag in der Datei <b>config.js</b> die Daten deines Supabase-Projekts ein. Wie das geht, steht in der Anleitung.</p>`;return;
+  }
+  if(!SY.sb){box.innerHTML=`<p class="syncmsg ${SY.err?'err':''}">${esc(SY.err||'Verbinde mit Supabase …')}</p>`;return;}
+  if(!SY.user){
+    box.innerHTML=`<p>Melde dich auf jedem Gerät mit demselben Konto an. Dann sind deine Karten überall gleich.</p>
+      <label class="field"><span>E-Mail</span><input type="email" id="sEmail" autocomplete="username" autocapitalize="off" inputmode="email"></label>
+      <label class="field"><span>Passwort</span><input type="password" id="sPass" autocomplete="current-password" minlength="6"></label>
+      ${msg}
+      <div class="row2"><button class="btn" data-action="sync-signup">Konto erstellen</button><button class="btn primary" data-action="sync-login">Anmelden</button></div>`;
+    return;
+  }
+  const st=syncState();
+  box.innerHTML=`<p>Angemeldet als <b>${esc(SY.user.email||'')}</b></p>
+    <p class="syncmsg ${st.cls==='err'?'err':''}"><span class="syncline"><span class="syncdot ${st.cls}"></span>${esc(st.text)}</span></p>
+    ${SY.err?`<p class="syncmsg err">${esc(SY.err)}</p>`:''}${msg}
+    <div class="row2"><button class="btn" data-action="sync-logout">Abmelden</button><button class="btn primary" data-action="sync-now">Jetzt abgleichen</button></div>`;
+}
+function authMsg(m){
+  const t={'Invalid login credentials':'E-Mail oder Passwort ist falsch.','Email not confirmed':'Bitte bestätige zuerst deine E-Mail über den Link in deinem Postfach.',
+    'User already registered':'Für diese E-Mail gibt es schon ein Konto. Tippe auf „Anmelden“.','Signups not allowed for this instance':'Neue Konten sind in deinem Supabase-Projekt gesperrt.'};
+  return t[m]||m;
+}
+async function doAuth(signup){
+  const email=($('#sEmail')||{}).value?.trim(),pw=($('#sPass')||{}).value||'';
+  if(!email||pw.length<6){SY.msg='Gib deine E-Mail und ein Passwort mit mindestens 6 Zeichen ein.';SY.msgErr=true;drawSyncBox(true);return;}
+  SY.msg=signup?'Erstelle Konto …':'Melde an …';SY.msgErr=false;drawSyncBox(true);
+  try{
+    const r=signup?await SY.sb.auth.signUp({email,password:pw}):await SY.sb.auth.signInWithPassword({email,password:pw});
+    if(r.error){SY.msg=authMsg(r.error.message);SY.msgErr=true;}
+    else if(signup&&!r.data.session){SY.msg='Fast geschafft: Öffne die E-Mail von Supabase und tippe auf den Bestätigungslink. Danach hier auf „Anmelden“ tippen.';SY.msgErr=false;}
+    else{SY.msg='';}
+  }catch(e){SY.msg='Keine Verbindung. Bist du online?';SY.msgErr=true;}
+  drawSyncBox(true);
+}
 
 /* ---------- Start ---------- */
 const SEEDED='vokabelkasten.seeded';
@@ -669,6 +844,7 @@ function seedExample(){
 }
 function init(){
   lsLoad();seedExample();S.ready=true;render();
+  loadSupabase();
   if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
   if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
