@@ -3,6 +3,6 @@
 // Der öffentliche Schlüssel ("anon public" oder "Publishable key") darf öffentlich sein:
 // Wer welche Daten sehen darf, regelt die Datenbank selbst.
 window.VOKABEL_SYNC = {
-  url: '',      // z. B. 'https://abcdefghijkl.supabase.co'
-  anonKey: ''   // der lange öffentliche Schlüssel
+  url: 'https://uxfkxhutqdghvhgjekfg.supabase.co',
+  anonKey: 'sb_publishable_LNng3GFOXqRSOkGRPzQ81Q_2QJulnZg'
 };
